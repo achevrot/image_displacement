@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "papier-thomas"
+version = "0.1.0"
+description = ""
+authors = ["achevrot <antoine.chevrot@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+tinygrad = {git = "https://github.com/tinygrad/tinygrad"}
+tqdm = "^4.66.4"
+pillow = "^10.3.0"
+pandas = "^2.2.2"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.9"
+black = "^24.4.2"
+ipykernel = "^6.29.4"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
