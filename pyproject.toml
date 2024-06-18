@@ -11,6 +11,8 @@ tinygrad = {git = "https://github.com/tinygrad/tinygrad"}
 tqdm = "^4.66.4"
 pillow = "^10.3.0"
 pandas = "^2.2.2"
+matplotlib = "^3.9.0"
+scipy = "^1.13.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.9"

@@ -4,6 +4,8 @@ from tinygrad import Tensor
 import numpy as np
 import pandas as pd
 import glob
+import matplotlib.pyplot as plt
+from scipy.ndimage import rotate
 
 
 def img_2_tensor(filename):
@@ -27,7 +29,6 @@ def displacement_2_tensor(filename):
 
 
 def rotate_vectors(x_matrix, y_matrix, angle_degrees):
-
     angle_radians = np.radians(angle_degrees)
 
     # Create the rotation matrix
@@ -56,16 +57,37 @@ def rotate_vectors(x_matrix, y_matrix, angle_degrees):
     return new_x_matrix, new_y_matrix
 
 
+def rotate_image(image, angle):
+    # Rotate the image using scipy's rotate function
+    rotated_image = rotate(image, angle, reshape=False)
+    return rotated_image
+
+
 # %%
 
 
 n_exemple = sum(
-    1 for _ in glob.glob("Dataset/images/simple_rotation_img_*.tif")
+    1 for _ in glob.glob("Dataset/source/images/simple_rotation_img_*.tif")
 )
 t = Tensor.empty(n_exemple, 1, 257, 257)
 
-for i, file in enumerate(glob.glob("Dataset/images/simple_rotation_img_*.tif")):
+for i, file in enumerate(
+    glob.glob("Dataset/source/images/simple_rotation_img_*.tif")
+):
+
     t[i] = img_2_tensor(file)
+
+    plt.subplot(1, 2, 1)
+    plt.imshow(t[i].numpy()[0], cmap="gray")
+    plt.title("Original Image")
+
+    rotated_image = rotate_image(t[i].numpy()[0], 90)
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(rotated_image, cmap="gray")
+    plt.title("Rotated Image")
+    plt.show()
+
 
 np.save("X_dataset", t.numpy())
 # %%
@@ -80,10 +102,10 @@ for i, file in enumerate(glob.glob("Dataset/labels_x/*.csv")):
 np.save("Y_dataset", t.numpy())
 # %%
 
-from tinygrad.nn.datasets import mnist
 
-X_train, Y_train = Tensor(np.load("X_dataset.npy")), Tensor(
-    np.load("Y_dataset.npy")
-).reshape(-1, 1, 256, 256)
+X_train, Y_train = (
+    Tensor(np.load("X_dataset.npy")),
+    Tensor(np.load("Y_dataset.npy")).reshape(-1, 1, 256, 256),
+)
 print(X_train.shape, X_train.dtype, Y_train.shape, Y_train.dtype)
 # %%
