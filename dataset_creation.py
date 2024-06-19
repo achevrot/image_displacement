@@ -1,111 +1,26 @@
 # %%
-from PIL import Image
+import glob
+from helpers import rotate_image, displacement_2_tensor, img_2_tensor
 from tinygrad import Tensor
 import numpy as np
-import pandas as pd
-import glob
-import matplotlib.pyplot as plt
-from scipy.ndimage import rotate
-
-
-def img_2_tensor(filename):
-    img = Image.open(filename)
-    aspect_ratio = img.size[0] / img.size[1]
-    img = img.resize(
-        (
-            int(257 * max(aspect_ratio, 1.0)),
-            int(257 * max(1.0 / aspect_ratio, 1.0)),
-        )
-    )
-    img = np.array(img)
-    img = img.astype(np.float32).reshape(1, 257, 257)
-    img /= 255.0
-
-    return Tensor(img)
-
-
-def displacement_2_tensor(filename):
-    return Tensor(pd.read_csv(filename, sep=",", header=None).values)
-
-
-def rotate_vectors(x_matrix, y_matrix, angle_degrees):
-    angle_radians = np.radians(angle_degrees)
-
-    # Create the rotation matrix
-    cos_theta = np.cos(angle_radians)
-    sin_theta = np.sin(angle_radians)
-    rotation_matrix = np.array(
-        [[cos_theta, -sin_theta], [sin_theta, cos_theta]]
-    )
-
-    # Stack the x and y matrices vertically to create a matrix of shape (2, 256, 256)
-    vectors = np.stack((x_matrix, y_matrix))
-
-    # Reshape the vectors matrix to shape (2, 256*256)
-    vectors_reshaped = vectors.reshape(2, -1)
-
-    # Apply the rotation matrix to the reshaped vectors matrix
-    rotated_vectors = np.dot(rotation_matrix, vectors_reshaped)
-
-    # Reshape the rotated vectors back to shape (2, 256, 256)
-    rotated_vectors_reshaped = rotated_vectors.reshape(2, 256, 256)
-
-    # Extract the new x and y matrices from the rotated vectors
-    new_x_matrix = rotated_vectors_reshaped[0]
-    new_y_matrix = rotated_vectors_reshaped[1]
-
-    return new_x_matrix, new_y_matrix
-
-
-def rotate_image(image, angle):
-    # Rotate the image using scipy's rotate function
-    rotated_image = rotate(image, angle, reshape=False)
-    return rotated_image
-
 
 # %%
+n = str(0).zfill(3)
+x_path = "Dataset/source/images/simple_rotation_img_{}.tif"
+y_path = "Dataset/source/displacement_x/Image_{}_Ux.csv"
 
+n_exemple = sum(1 for _ in glob.glob("Dataset/source/images/*"))
+ds = Tensor.empty(n_exemple, 2, 257, 257)
 
-n_exemple = sum(
-    1 for _ in glob.glob("Dataset/source/images/simple_rotation_img_*.tif")
-)
-t = Tensor.empty(n_exemple, 1, 257, 257)
+for file_num in range(1, n_exemple):
 
-for i, file in enumerate(
-    glob.glob("Dataset/source/images/simple_rotation_img_*.tif")
-):
+    x_i = img_2_tensor(x_path.format(str(file_num).zfill(3)))
+    # --> (1, 1, 257, 257)
+    y_i = displacement_2_tensor(y_path.format(str(file_num).zfill(3)))
+    # --> (1, 257, 257)
+    ds[file_num] = x_i.stack(y_i.expand(1, -1, -1), dim=1)[0]
+    # --> (1, 1, 257, 257) + (1, 257, 257).expend ==> (1, 2, 257, 257)
 
-    t[i] = img_2_tensor(file)
-
-    plt.subplot(1, 2, 1)
-    plt.imshow(t[i].numpy()[0], cmap="gray")
-    plt.title("Original Image")
-
-    rotated_image = rotate_image(t[i].numpy()[0], 90)
-
-    plt.subplot(1, 2, 2)
-    plt.imshow(rotated_image, cmap="gray")
-    plt.title("Rotated Image")
-    plt.show()
-
-
-np.save("X_dataset", t.numpy())
-# %%
-
-n_exemple = sum(1 for _ in glob.glob("Dataset/labels_x/*.csv"))
-
-t = Tensor.empty(n_exemple, 1, 256, 256)
-
-for i, file in enumerate(glob.glob("Dataset/labels_x/*.csv")):
-    t[i] = displacement_2_tensor(file)
-
-np.save("Y_dataset", t.numpy())
-# %%
-
-
-X_train, Y_train = (
-    Tensor(np.load("X_dataset.npy")),
-    Tensor(np.load("Y_dataset.npy")).reshape(-1, 1, 256, 256),
-)
-print(X_train.shape, X_train.dtype, Y_train.shape, Y_train.dtype)
+# save to disk a (n_exemple, 2, 257, 257) tensor
+np.save("dataset", ds.numpy())
 # %%
