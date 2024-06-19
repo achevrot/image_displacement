@@ -1,6 +1,6 @@
 # %%
 import glob
-from helpers import rotate_image, displacement_2_tensor, img_2_tensor
+from helpers import displacement_2_tensor, img_2_tensor
 from tinygrad import Tensor
 import numpy as np
 
