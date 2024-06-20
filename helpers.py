@@ -1,8 +1,9 @@
 from PIL import Image
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
 import numpy as np
 import pandas as pd
 from scipy.ndimage import rotate
+import matplotlib.pyplot as plt
 
 
 def img_2_tensor(filename):
@@ -58,3 +59,16 @@ def rotate_image(image, angle):
     # Rotate the image using scipy's rotate function
     rotated_image = rotate(image, angle, reshape=False)
     return rotated_image
+
+
+def plot_image(origin_tensor, output_tensor):
+    plt.subplot(1, 2, 1)
+    img = (origin_tensor * 255).cast(dtypes.int32).numpy()
+    plt.imshow(img, cmap="gray")
+    plt.title("Original Image")
+
+    plt.subplot(1, 2, 2)
+    img = (output_tensor * 255).cast(dtypes.int32).numpy()
+    plt.imshow(img, cmap="gray")
+    plt.title("Output Image")
+    plt.show()

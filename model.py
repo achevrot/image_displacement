@@ -5,11 +5,16 @@ from tinygrad import Tensor, TinyJit, nn, GlobalCounters
 from tinygrad.helpers import getenv, colored
 from tqdm import trange
 from dataloader import load
+from helpers import plot_image
+import numpy as np
+from tinygrad.nn.state import get_parameters
+
+QUICK = getenv("QUICK")
 
 
 class Encoder:
 
-    def __init__(self, latent_dim=64, base_channel_size=32):
+    def __init__(self, latent_dim, base_channel_size=32):
 
         c_hid = base_channel_size
         self.layers: List[Callable[[Tensor], Tensor]] = [
@@ -40,7 +45,7 @@ class Encoder:
 
 
 class Decoder:
-    def __init__(self, latent_dim=64, base_channel_size=32):
+    def __init__(self, latent_dim, base_channel_size=32):
 
         c_hid = base_channel_size
         self.linear: List[Callable[[Tensor], Tensor]] = [
@@ -93,26 +98,35 @@ class Decoder:
 
 
 class AutoEncoder:
-    def __init__(self):
-        self.layers = [Encoder(), Decoder()]
+    def __init__(self, latent_dim=64):
+        self.layers = [
+            Encoder(latent_dim),
+            Decoder(latent_dim),
+            # lambda x: x.sigmoid(),
+        ]
 
     def __call__(self, x: Tensor) -> Tensor:
         return x.sequential(self.layers)
 
+    def save(self, filename):
+        with open(filename + ".npy", "wb") as f:
+            for par in get_parameters(self):
+                # if par.requires_grad:
+                np.save(f, par.numpy())
+
 
 def MSEloss(y_hat, y):
-    return ((y_hat - y) ** 2).mean()
+    return ((y_hat - y) ** 2).sum(axis=[1, 2, 3]).mean(axis=[0])
 
 
 if __name__ == "__main__":
     X_train, Y_train, X_test, Y_test = load()
     # TODO: remove this when HIP is fixed
     X_train, X_test = X_train.float(), X_test.float()
-    model = AutoEncoder()
-    opt = nn.optim.Adam(nn.state.get_parameters(model))
+    model = AutoEncoder(128)
     samples = Tensor.randint(1, high=X_train.shape[0])
 
-    def train_step() -> Tensor:
+    def train_step(opt) -> Tensor:
         with Tensor.train():
             opt.zero_grad()
             samples = Tensor.randint(1, high=X_train.shape[0])
@@ -122,23 +136,34 @@ if __name__ == "__main__":
             return loss
 
     def get_test_acc() -> Tensor:
-        return (model(X_test).argmax(axis=1) == X_test).mean() * 100
+        return MSEloss(model(X_test), X_test)
 
-    test_acc = float("nan")
-    for i in (t := trange(70)):
-        GlobalCounters.reset()  # NOTE: this makes it nice for DEBUG=2 timing
-        loss = train_step()
-        if i % 10 == 9:
-            test_acc = get_test_acc().item()
-        t.set_description(
-            f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%"
-        )
+    lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
+    epochss = [2, 1] if QUICK else [13, 3, 3, 1]
 
-    # verify eval acc
-    if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
-        if test_acc >= target and test_acc != 100.0:
-            print(colored(f"{test_acc=} >= {target}", "green"))
-        else:
-            raise ValueError(colored(f"{test_acc=} < {target}", "red"))
+    for lr, epochs in zip(lrs, epochss):
+        optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=lr)
+        for epoch in range(1, epochs + 1):
+            print(f"epoch {epoch}/{epochs}")
+            test_acc = float("nan")
+            for i in (t := trange(70)):
+                GlobalCounters.reset()  # NOTE: this makes it nice for DEBUG=2 timing
+                loss = train_step(optimizer)
+                t.set_description(f"loss: {loss.item():6.5f}")
+                if i % 10 == 9:
+                    test_acc = get_test_acc().item()
 
+                # verify eval acc
+                if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
+                    if test_acc >= target and test_acc != 100.0:
+                        print(colored(f"{test_acc=} >= {target}", "green"))
+                    else:
+                        raise ValueError(
+                            colored(f"{test_acc=} < {target}", "red")
+                        )
+
+            print(f"test_accuracy: {test_acc:5.5f}")
+            model.save(f"checkpoints/checkpoint{test_acc * 1e6:.0f}")
+
+    plot_image(X_test[1][0], model(X_test)[1][0])
 # %%
