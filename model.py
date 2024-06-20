@@ -99,13 +99,14 @@ class Decoder:
 
 class AutoEncoder:
     def __init__(self, latent_dim=64):
-        self.layers = [
+        self.ref_enc = [
             Encoder(latent_dim),
             Decoder(latent_dim),
             # lambda x: x.sigmoid(),
         ]
 
     def __call__(self, x: Tensor) -> Tensor:
+
         return x.sequential(self.layers)
 
     def save(self, filename):
@@ -124,19 +125,18 @@ if __name__ == "__main__":
     # TODO: remove this when HIP is fixed
     X_train, X_test = X_train.float(), X_test.float()
     model = AutoEncoder(128)
-    samples = Tensor.randint(1, high=X_train.shape[0])
 
     def train_step(opt) -> Tensor:
         with Tensor.train():
             opt.zero_grad()
             samples = Tensor.randint(1, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            loss = MSEloss(model(X_train[samples]), X_train[samples]).backward()
+            loss = MSEloss(model(X_train[samples]), Y_train[samples]).backward()
             opt.step()
             return loss
 
     def get_test_acc() -> Tensor:
-        return MSEloss(model(X_test), X_test)
+        return MSEloss(model(X_test), Y_test)
 
     lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
     epochss = [2, 1] if QUICK else [13, 3, 3, 1]
