@@ -44,9 +44,7 @@ class RefAutoEncoder:
             opt.zero_grad()
             samples = Tensor.randint(1, high=input.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            loss = MSEloss(
-                self.__call__(input[samples]), output[samples]
-            ).backward()
+            loss = MSEloss(self.__call__(input[samples]), output[samples]).backward()
             opt.step()
             return loss
 
@@ -70,9 +68,7 @@ class AutoEncoder:
             opt.zero_grad()
             samples = Tensor.randint(1, high=input.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            loss = MSEloss(
-                self.__call__(input[samples]), output[samples]
-            ).backward()
+            loss = MSEloss(self.__call__(input[samples]), output[samples]).backward()
             opt.step()
             return loss
 
@@ -128,7 +124,6 @@ plot_image(X_ref[0][0], rae(X_ref)[0][0])
 # %%
 
 X_train, Y_train, X_test, Y_test = load()
-X_ref = img_2_tensor("Dataset/source/ref.tif").expand((1, -1, -1, -1))
 # TODO: remove this when HIP is fixed
 X_train, X_test = X_train.float(), X_test.float()
 # samples = Tensor.randint(1, high=X_train.shape[0])

@@ -6,7 +6,7 @@ from scipy.ndimage import rotate
 import matplotlib.pyplot as plt
 
 
-def img_2_tensor(filename):
+def img_2_tensor(filename, norm=True):
     img = Image.open(filename)
     aspect_ratio = img.size[0] / img.size[1]
     img = img.resize(
@@ -32,9 +32,7 @@ def rotate_vectors(x_matrix, y_matrix, angle_degrees):
     # Create the rotation matrix
     cos_theta = np.cos(angle_radians)
     sin_theta = np.sin(angle_radians)
-    rotation_matrix = np.array(
-        [[cos_theta, -sin_theta], [sin_theta, cos_theta]]
-    )
+    rotation_matrix = np.array([[cos_theta, -sin_theta], [sin_theta, cos_theta]])
 
     # Stack the x and y matrices vertically to create a matrix of shape (2, 256, 256)
     vectors = np.stack((x_matrix, y_matrix))

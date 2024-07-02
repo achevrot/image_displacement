@@ -10,15 +10,17 @@ def load():
     n_split = int(ds.shape[0] * 0.8)
     np.random.shuffle(ds)
 
-    ds_train, ds_test = ds[:n_split, :], ds[n_split:, :]
+    ds_train, ds_test = ds[:n_split, :, :], ds[n_split:, :, :]
+
+    # reminder : dim 1 = ref, mod, Ux, Uy
 
     X_train, Y_train = (
-        Tensor(ds_train[:, 0, np.newaxis, :, :]),
-        Tensor(ds_train[:, 1, np.newaxis, :, :]),
+        Tensor(ds_train[:, :2, :, :]),
+        Tensor(ds_train[:, 2:, :, :]),
     )
     X_test, Y_test = (
-        Tensor(ds_test[:, 0, np.newaxis, :, :]),
-        Tensor(ds_test[:, 1, np.newaxis, :, :]),
+        Tensor(ds_test[:, :2, :, :]),
+        Tensor(ds_test[:, 2:, :, :]),
     )
 
     return X_train, Y_train, X_test, Y_test
