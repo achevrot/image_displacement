@@ -7,60 +7,15 @@ from tqdm import trange
 from dataloader import load
 from helpers import plot_image
 import numpy as np
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, load_state_dict
 from itertools import chain
 
-QUICK = False
+GPU = getenv("GPU")
+QUICK = getenv("QUICK")
 
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import CI
 from tinygrad.engine.jit import TinyJit
-
-
-def train(
-    model,
-    X_train,
-    Y_train,
-    optim,
-    steps,
-    BS=128,
-    lossfn=lambda out, y: out.sparse_categorical_crossentropy(y),
-    transform=lambda x: x,
-    target_transform=lambda x: x,
-    noloss=False,
-    allow_jit=True,
-):
-
-    def train_step(x, y):
-        # network
-        out = model.forward(x) if hasattr(model, "forward") else model(x)
-        loss = lossfn(out, y)
-        optim.zero_grad()
-        loss.backward()
-        if noloss:
-            del loss
-        optim.step()
-        if noloss:
-            return (None, None)
-        return loss.realize()
-
-    if allow_jit:
-        train_step = TinyJit(train_step)
-
-    with Tensor.train():
-        losses, accuracies = [], []
-        for i in (t := trange(steps, disable=CI)):
-            samp = Tensor.randint(BS, high=X_train.shape[0])
-            x = X_train[samp]
-            y = Y_train[samp]
-            loss = train_step(x, y)
-            # printing
-            if not noloss:
-                loss = loss.numpy()
-                losses.append(loss)
-                t.set_description("loss %.2f" % (loss))
-    return [losses]
 
 
 class conv:
@@ -101,7 +56,7 @@ class conv:
                     padding=pad,
                     bias=True,
                 ),
-                Tensor.leakyrelu,
+                Tensor.relu,
             ]
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -119,7 +74,7 @@ class deconv:
             nn.ConvTranspose2d(
                 in_planes, out_planes, kernel_size=5, stride=2, padding=2, bias=True
             ),
-            Tensor.leakyrelu,
+            Tensor.relu,
         ]
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -198,17 +153,8 @@ class FlowNetS:
         self.upsampled_flow4_to_3 = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
         self.upsampled_flow3_to_2 = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
 
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         if m.bias is not None:
-        #             init.uniform_(m.bias)
-        #         init.xavier_uniform_(m.weight)
+        # weights are by default initialized with kaiming normals
 
-        #     if isinstance(m, nn.ConvTranspose2d):
-        #         if m.bias is not None:
-        #             init.uniform_(m.bias)
-        #         init.xavier_uniform_(m.weight)
-        #         # init_deconv_bilinear(m.weight)
         self.upsample1 = Upsample2(2)
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -242,7 +188,7 @@ class FlowNetS:
         concat2 = out_conv2.cat(out_deconv2, flow3_up, dim=1)
         flow2 = self.predict_flow2(concat2)
 
-        if not self.training:
+        if self.training:
             return self.upsample1(flow2), flow3, flow4, flow5, flow6
         else:
             return self.upsample1(flow2)
@@ -253,9 +199,37 @@ class FlowNetS:
                 # if par.requires_grad:
                 np.save(f, par.numpy())
 
+    def load(self, filename):
+        with open(filename + ".npy", "rb") as f:
+            for par in get_parameters(self):
+                # if par.requires_grad:
+                try:
+                    par.numpy()[:] = np.load(f)
+                    if GPU:
+                        par.gpu()
+                except:
+                    print("Could not load parameter")
+
 
 def MSEloss(y_hat, y):
-    return ((y_hat - y) ** 2).sum().mean()
+    return ((y_hat - y) ** 2).sum(axis=1).mean()
+
+
+def multiscaleEPE(network_output, target_flow, weights=None, sparse=False):
+    if type(network_output) not in [tuple, list]:
+        network_output = [network_output]
+    if weights is None:
+        weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
+    assert len(weights) == len(network_output)
+
+    loss = 0
+    for i, (output, weight) in enumerate(zip(network_output, weights)):
+        if i != 0:
+            conv = nn.Conv2d(2, 2, kernel_size=5, stride=4 * i, padding=2)
+            loss += weight * MSEloss(output, conv(target_flow))
+        else:
+            loss += weight * MSEloss(output, target_flow)
+    return loss
 
 
 if __name__ == "__main__":
@@ -263,21 +237,24 @@ if __name__ == "__main__":
     X_train, Y_train, X_test, Y_test = load()
     # TODO: remove this when HIP is fixed
     X_train, X_test = X_train.float(), X_test.float()
-    samples = Tensor.randint(1, high=X_train.shape[0])
     model = FlowNetS(input_channels=2)
 
-    BS = 1
+    BS = 4
     steps = len(X_train) // BS
 
+    @TinyJit
     def train_step(opt) -> Tensor:
         with Tensor.train():
             opt.zero_grad()
-            samples = Tensor.randint(10, high=X_train.shape[0])
+            samples = Tensor.randint(BS, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            loss = MSEloss(model(X_train[samples])[0], Y_train[samples]).backward()
+            outputs = model(X_train[samples])
+            print(outputs)
+            loss = multiscaleEPE(outputs, Y_train[samples]).backward()
             opt.step()
             return loss
 
+    @TinyJit
     def get_test_acc() -> Tensor:
         return MSEloss(model(X_test), Y_test)
 
@@ -289,42 +266,15 @@ if __name__ == "__main__":
     for lr, epochs in zip(lrs, epochss):
         optimizer = optim.Adam(nn.state.get_parameters(model), lr=lr)
         for epoch in range(1, epochs + 1):
-            # first epoch without augmentation
-            train(
-                model,
-                X_train,
-                Y_train,
-                optimizer,
-                steps=steps,
-                lossfn=MSEloss,
-                BS=BS,
-            )
+            print(f"epoch {epoch}/{epochs}")
+            test_acc = float("nan")
+            for i in (t := trange(steps)):
+                GlobalCounters.reset()  # NOTE: this makes it nice for DEBUG=2 timing
+                loss = train_step(optimizer)
+                t.set_description(f"loss: {loss.item():6.5f}")
+
             accuracy = get_test_acc().numpy()
-            print(f"accuracy : {accuracy:.0f}")
-            model.save(f"checkpoints/checkpoint{accuracy:.0f}")
-
-    # for lr, epochs in zip(lrs, epochss):
-    #     optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=lr)
-    #     for epoch in range(1, epochs + 1):
-    #         print(f"epoch {epoch}/{epochs}")
-    #         test_acc = float("nan")
-    #         for i in (t := trange(70)):
-    #             GlobalCounters.reset()  # NOTE: this makes it nice for DEBUG=2 timing
-    #             loss = train_step(optimizer)
-    #             t.set_description(f"loss: {loss.item():6.5f}")
-    #             if i % 10 == 9:
-    #                 test_acc = get_test_acc().item()
-
-    #             # verify eval acc
-    #             if target := getenv("TARGET_EVAL_ACC_PCT", 0.0):
-    #                 if test_acc >= target and test_acc != 100.0:
-    #                     print(colored(f"{test_acc=} >= {target}", "green"))
-    #                 else:
-    #                     raise ValueError(colored(f"{test_acc=} < {target}", "red"))
-
-    #         print(f"test_accuracy: {test_acc:5.5f}")
-    #         model.save(f"checkpoints/checkpoint{test_acc * 1e6:.0f}")
-
-    # plot_image(X_train[samples], model(X_train[samples]))
+            print(f"accuracy : {accuracy:.4f}")
+            model.save(f"checkpoints/checkpoint{accuracy:.4f}")
 
 # %%

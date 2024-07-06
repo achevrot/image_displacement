@@ -59,14 +59,16 @@ def rotate_image(image, angle):
     return rotated_image
 
 
-def plot_image(origin_tensor, output_tensor):
-    plt.subplot(1, 2, 1)
+def plot_image(origin_tensor, output_tensor, figsize=(10, 10)):
+    f = plt.figure(figsize=figsize)
+    ax = f.add_subplot(121)
+    ax2 = f.add_subplot(122)
     img = (origin_tensor * 255).cast(dtypes.int32).numpy()
-    plt.imshow(img, cmap="gray")
-    plt.title("Original Image")
+    ax.imshow(img, cmap="gray")
+    ax.set_title("Original Image")
 
     plt.subplot(1, 2, 2)
     img = (output_tensor * 255).cast(dtypes.int32).numpy()
-    plt.imshow(img, cmap="gray")
-    plt.title("Output Image")
+    ax2.imshow(img, cmap="gray")
+    ax2.set_title("Output Image")
     plt.show()
