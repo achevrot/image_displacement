@@ -14,8 +14,8 @@ from flow_model import FlowNetS
 # %%
 
 
-model = FlowNetS()
-# model.load("checkpoints/checkpoint0.1669")
+model = FlowNetS(training=False)
+model.load("checkpoints/checkpoint0.3298")
 
 # %%
 
@@ -26,11 +26,12 @@ X_test[samples][0, 0, ...]
 # %%
 
 plot_image(
-    model(X_train[samples])[0, 0, ...],
-    model(X_train[samples])[0, 1, ...],
+    model(X_test[samples])[0, 0, ...],
+    model(X_test[samples])[0, 1, ...],
     figsize=(20, 20),
 )
-plot_image(Y_train[samples][0, 1, ...], Y_test[samples][0, 0, ...], figsize=(20, 20))
+
+plot_image(Y_test[samples][0, 0, ...], Y_test[samples][0, 1, ...], figsize=(20, 20))
 
 
 # %%

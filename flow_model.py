@@ -126,7 +126,7 @@ class FlowNetS:
 
         self.training = training
         self.batchNorm = batchNorm
-        self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=2)
+        self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=1)
         self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=1)
         self.conv3 = conv(self.batchNorm, 128, 256, kernel_size=5, stride=2)
         self.conv3_1 = conv(self.batchNorm, 256, 256)
@@ -189,9 +189,9 @@ class FlowNetS:
         flow2 = self.predict_flow2(concat2)
 
         if self.training:
-            return self.upsample1(flow2), flow3, flow4, flow5, flow6
+            return flow2, flow3, flow4, flow5, flow6
         else:
-            return self.upsample1(flow2)
+            return flow2
 
     def save(self, filename):
         with open(filename + ".npy", "wb") as f:
@@ -211,35 +211,46 @@ class FlowNetS:
                     print("Could not load parameter")
 
 
-def MSEloss(y_hat, y):
-    return ((y_hat - y) ** 2).sum(axis=1).mean()
+def MSEloss(y_hat, y, mean=False):
+    if mean:
+        return ((y_hat - y) ** 2).mean()
+    else:
+        batch_size = y_hat.shape[0]
+        return ((y_hat - y) ** 2).sum() / batch_size
 
 
-def multiscaleEPE(network_output, target_flow, weights=None, sparse=False):
+def multiscaleEPE(network_output, target_flow, weights=None):
     if type(network_output) not in [tuple, list]:
         network_output = [network_output]
     if weights is None:
         weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
     assert len(weights) == len(network_output)
 
-    loss = 0
     for i, (output, weight) in enumerate(zip(network_output, weights)):
         if i != 0:
-            conv = nn.Conv2d(2, 2, kernel_size=5, stride=4 * i, padding=2)
-            loss += weight * MSEloss(output, conv(target_flow))
+            conv = nn.Conv2d(2, 2, kernel_size=2, stride=2**i, padding=1)
+            mse = MSEloss(output, conv(target_flow))
+            loss = loss.add(mse.mul(weight))
         else:
-            loss += weight * MSEloss(output, target_flow)
+            mse = MSEloss(output, target_flow)
+            loss = mse.mul(weight)
     return loss
 
 
 if __name__ == "__main__":
 
+    BS = 1
+
     X_train, Y_train, X_test, Y_test = load()
     # TODO: remove this when HIP is fixed
     X_train, X_test = X_train.float(), X_test.float()
     model = FlowNetS(input_channels=2)
+    samples = Tensor.randint(BS, high=X_train.shape[0])
+    # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
+    outputs = model(X_train[samples])
+    print(samples)
+    print(MSEloss(outputs[0], Y_train[samples]).backward())
 
-    BS = 4
     steps = len(X_train) // BS
 
     @TinyJit
@@ -249,14 +260,14 @@ if __name__ == "__main__":
             samples = Tensor.randint(BS, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
             outputs = model(X_train[samples])
-            print(outputs)
+            print(outputs[0])
             loss = multiscaleEPE(outputs, Y_train[samples]).backward()
             opt.step()
             return loss
 
     @TinyJit
     def get_test_acc() -> Tensor:
-        return MSEloss(model(X_test), Y_test)
+        return MSEloss(model(X_test)[0], Y_test, mean=True)
 
     params = get_parameters(model)
     [x.gpu() for x in params]
