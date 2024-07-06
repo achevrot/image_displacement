@@ -155,7 +155,7 @@ class FlowNetS:
 
         # weights are by default initialized with kaiming normals
 
-        self.upsample1 = Upsample2(2)
+        # self.upsample1 = Upsample2(2)
 
     def __call__(self, x: Tensor) -> Tensor:
 
@@ -212,11 +212,18 @@ class FlowNetS:
 
 
 def MSEloss(y_hat, y, mean=False):
-    if mean:
-        return ((y_hat - y) ** 2).mean()
-    else:
-        batch_size = y_hat.shape[0]
-        return ((y_hat - y) ** 2).sum() / batch_size
+    # if mean:
+    return ((y_hat - y) ** 2).mean()
+
+
+# else:
+#     batch_size = y_hat.shape[0]
+#     return ((y_hat - y) ** 2).sum() / batch_size
+
+
+def MSEloss2(y_hat, y, mean=False):
+    # if mean:
+    return y_hat.sub(y).pow(2).mean()
 
 
 def multiscaleEPE(network_output, target_flow, weights=None):
@@ -247,9 +254,6 @@ if __name__ == "__main__":
     model = FlowNetS(input_channels=2)
     samples = Tensor.randint(BS, high=X_train.shape[0])
     # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-    outputs = model(X_train[samples])
-    print(samples)
-    print(MSEloss(outputs[0], Y_train[samples]).backward())
 
     steps = len(X_train) // BS
 
@@ -259,9 +263,7 @@ if __name__ == "__main__":
             opt.zero_grad()
             samples = Tensor.randint(BS, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            outputs = model(X_train[samples])
-            print(outputs[0])
-            loss = multiscaleEPE(outputs, Y_train[samples]).backward()
+            loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
             opt.step()
             return loss
 

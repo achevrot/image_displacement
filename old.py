@@ -15,7 +15,7 @@ from flow_model import FlowNetS
 
 
 model = FlowNetS(training=False)
-model.load("checkpoints/checkpoint0.3298")
+model.load("checkpoints/checkpoint0.2354")
 
 # %%
 
