@@ -11,7 +11,7 @@ from itertools import chain
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
 
-BS = 4
+BS = 1
 Tensor.manual_seed(42)
 
 
@@ -101,13 +101,20 @@ class Upsample:
 
 
 class Upsample2:
-    def __init__(self):
-        pass
+    def __init__(self, scale_factor=2):
+        self.scale_factor = scale_factor
 
     def __call__(self, x):
         bs, c, py, px = x.shape
-        x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py * 2, px * 2)
-        return x[:, :, :-1, :-1]
+        x = (
+            x.reshape(bs, c, py, 1, px, 1)
+            .expand(bs, c, py, self.scale_factor, px, self.scale_factor)
+            .reshape(bs, c, py * self.scale_factor, px * self.scale_factor)
+        )
+        if self.scale_factor == 1:
+            return x
+        else:
+            return x[:, :, :-1, :-1]
 
 
 class FlowNetS:
@@ -117,7 +124,7 @@ class FlowNetS:
 
         self.training = training
         self.batchNorm = batchNorm
-        self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=2)
+        self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=1)
         self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=1)
         self.conv3 = conv(self.batchNorm, 128, 256, kernel_size=5, stride=2)
         self.conv3_1 = conv(self.batchNorm, 256, 256)
@@ -146,7 +153,7 @@ class FlowNetS:
 
         # weights are by default initialized with kaiming normals
 
-        self.upsample1 = Upsample2()
+        self.upsample1 = Upsample2(1)
 
     def __call__(self, x: Tensor) -> Tensor:
 
@@ -221,12 +228,12 @@ def MSEloss2(y_hat, y, mean=False, BS=1):
 
 def multiscaleEPE(network_output, target_flow, weights=None):
 
-    startScale = 4
+    startScale = 2
     numScales = len(network_output)
     loss_weights = Tensor([(0.32 / 2**scale) for scale in range(numScales)])
     assert len(loss_weights) == numScales
     multiScales = [
-        X_train[samples].avg_pool2d(startScale * (2**scale), startScale * (2**scale)).pad((None, None, (0, 1), (0, 1)))
+        target_flow.avg_pool2d(startScale * (2**scale), startScale * (2**scale)).pad((None, None, (0, 1), (0, 1)))
         for scale in range(numScales)
     ]
 
@@ -245,7 +252,10 @@ if __name__ == "__main__":
 
     X_train, Y_train, X_test, Y_test = load()
     # TODO: remove this when HIP is fixed
-    X_train, X_test = X_train.float(), X_test.float()
+    # X_train, X_test = X_train.float(), X_test.float()
+    # X_train_0 = X_train[:, 0, ...].stack(X_train[:, 0, ...], X_train[:, 0, ...], dim=1)
+    # X_train_1 = X_train[:, 1, ...].stack(X_train[:, 1, ...], X_train[:, 1, ...], dim=1)
+    # X_train = X_train_0.cat(X_train_1, dim=1)
     model = FlowNetS(input_channels=2)
     samples = Tensor.randint(BS, high=X_train.shape[0])
     # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
