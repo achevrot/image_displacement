@@ -11,6 +11,9 @@ from itertools import chain
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
 
+BS = 4
+Tensor.manual_seed(42)
+
 
 class conv:
 
@@ -38,7 +41,7 @@ class conv:
                     bias=False,
                 ),
                 nn.BatchNorm2d(out_channels),
-                Tensor.relu,
+                Tensor.leakyrelu,
             ]
         else:
             self.layers = [
@@ -50,7 +53,7 @@ class conv:
                     padding=pad,
                     bias=True,
                 ),
-                Tensor.relu,
+                Tensor.leakyrelu,
             ]
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -63,17 +66,17 @@ def predict_flow(in_planes):
 
 class deconv:
 
-    def __init__(self, in_planes, out_planes):
+    def __init__(self, in_planes, out_planes, stride=2, padding=2):
         self.layers = [
             nn.ConvTranspose2d(
                 in_planes,
                 out_planes,
                 kernel_size=5,
-                stride=2,
-                padding=2,
+                stride=stride,
+                padding=padding,
                 bias=True,
             ),
-            Tensor.relu,
+            Tensor.leakyrelu,
         ]
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -89,33 +92,22 @@ class Upsample:
     def __call__(self, x: Tensor) -> Tensor:
         assert len(x.shape) > 2 and len(x.shape) <= 5
         (b, c), _lens = x.shape[:2], len(x.shape[2:])
-        tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(
-            *[1, 1, 1] + [self.scale_factor] * _lens
-        )
+        tmp = x.reshape([b, c, -1] + [1] * _lens) * Tensor.ones(*[1, 1, 1] + [self.scale_factor] * _lens)
         return (
             tmp.reshape(list(x.shape) + [self.scale_factor] * _lens)
-            .permute(
-                [0, 1]
-                + list(
-                    chain.from_iterable([[y + 2, y + 2 + _lens] for y in range(_lens)])
-                )
-            )
+            .permute([0, 1] + list(chain.from_iterable([[y + 2, y + 2 + _lens] for y in range(_lens)])))
             .reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
         )
 
 
 class Upsample2:
-    def __init__(self, channels):
-        self.conv = conv(False, channels, channels, 10, padding=3)
+    def __init__(self):
+        pass
 
     def __call__(self, x):
         bs, c, py, px = x.shape
-        x = (
-            x.reshape(bs, c, py, 1, px, 1)
-            .expand(bs, c, py, 4, px, 4)
-            .reshape(bs, c, py * 4, px * 4)
-        )
-        return self.conv(x)
+        x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py * 2, px * 2)
+        return x[:, :, :-1, :-1]
 
 
 class FlowNetS:
@@ -126,7 +118,7 @@ class FlowNetS:
         self.training = training
         self.batchNorm = batchNorm
         self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=2)
-        self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=2)
+        self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=1)
         self.conv3 = conv(self.batchNorm, 128, 256, kernel_size=5, stride=2)
         self.conv3_1 = conv(self.batchNorm, 256, 256)
         self.conv4 = conv(self.batchNorm, 256, 512, stride=2)
@@ -154,7 +146,7 @@ class FlowNetS:
 
         # weights are by default initialized with kaiming normals
 
-        self.upsample1 = Upsample2(2)
+        self.upsample1 = Upsample2()
 
     def __call__(self, x: Tensor) -> Tensor:
 
@@ -219,6 +211,7 @@ def MSEloss(y_hat, y, mean=False):
 #     batch_size = y_hat.shape[0]
 #     return ((y_hat - y) ** 2).sum() / batch_size
 
+
 def MSEloss2(y_hat, y, mean=False, BS=1):
     if mean:
         return y_hat.sub(y).pow(2).mean()
@@ -227,28 +220,28 @@ def MSEloss2(y_hat, y, mean=False, BS=1):
 
 
 def multiscaleEPE(network_output, target_flow, weights=None):
-    if type(network_output) not in [tuple, list]:
-        network_output = [network_output]
-    if weights is None:
-        weights = [0.005, 0.01, 0.02, 0.08, 0.32]  # as in original article
-    assert len(weights) == len(network_output)
 
-    for i, (output, weight) in enumerate(zip(network_output, weights)):
+    startScale = 4
+    numScales = len(network_output)
+    loss_weights = Tensor([(0.32 / 2**scale) for scale in range(numScales)])
+    assert len(loss_weights) == numScales
+    multiScales = [
+        X_train[samples].avg_pool2d(startScale * (2**scale), startScale * (2**scale)).pad((None, None, (0, 1), (0, 1)))
+        for scale in range(numScales)
+    ]
+
+    for i, output in enumerate(network_output):
         if i == 0:
-            mse = MSEloss2(output, target_flow)
-            loss = mse.mul(weight)
+            mse = MSEloss(output, target_flow)
+            loss = mse.mul(loss_weights[i])
         else:
-            conv = nn.Conv2d(2, 2, kernel_size=2, stride=2**(i+2), padding=1)
-            rescale_flow = conv(target_flow)
-            mse = MSEloss2(output, rescale_flow)
-            loss = loss.add(mse.mul(weight))
-            
+            mse = MSEloss(output, multiScales[i - 1])
+            loss = loss.add(mse.mul(loss_weights[i]))
+
     return loss
 
 
 if __name__ == "__main__":
-
-    BS = 1
 
     X_train, Y_train, X_test, Y_test = load()
     # TODO: remove this when HIP is fixed
@@ -264,24 +257,25 @@ if __name__ == "__main__":
             opt.zero_grad()
             samples = Tensor.randint(BS, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            # loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
-            loss = MSEloss(model(X_train[samples])[0], Y_train[samples]).backward()
+            loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
+            # loss = MSEloss(model(X_train[samples])[0], Y_train[samples]).backward()
             opt.step()
             return loss
 
     def get_test_acc() -> Tensor:
-        return MSEloss(model(X_test)[0], Y_test, mean=True)
+        return MSEloss(model(X_test)[0], Y_test, mean=True) ** (1 / 2)
 
     if GPU:
         params = get_parameters(model)
         [x.gpu_() for x in params]
-        
-    lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
-    epochss = [2, 1] if QUICK else [13, 3, 3, 1]
 
+    lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
+    epochss = [2, 1] if QUICK else [100, 50, 50, 50]
+    total_ep = 0
     for lr, epochs in zip(lrs, epochss):
         optimizer = optim.Adam(nn.state.get_parameters(model), lr=lr)
         for epoch in range(1, epochs + 1):
+            total_ep += 1
             print(f"epoch {epoch}/{epochs}")
             test_acc = float("nan")
             for i in (t := trange(steps)):
@@ -291,6 +285,6 @@ if __name__ == "__main__":
 
             accuracy = get_test_acc().numpy()
             print(f"accuracy : {accuracy:.4f}")
-            model.save(f"checkpoints/checkpoint{accuracy:.4f}")
+            model.save(f"checkpoints/checkpoint{accuracy:.4f}_{total_ep}")
 
-# %%
+    # %%

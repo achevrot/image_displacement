@@ -48,9 +48,7 @@ class Decoder:
     def __init__(self, latent_dim, base_channel_size=32):
 
         c_hid = base_channel_size
-        self.linear: List[Callable[[Tensor], Tensor]] = [
-            nn.Linear(latent_dim, 4 * 16 * 16 * c_hid)
-        ]
+        self.linear: List[Callable[[Tensor], Tensor]] = [nn.Linear(latent_dim, 4 * 16 * 16 * c_hid)]
         self.net = [
             nn.ConvTranspose2d(
                 4 * c_hid,
@@ -85,9 +83,7 @@ class Decoder:
             Tensor.relu,
             nn.Conv2d(c_hid, c_hid, kernel_size=5, padding=1),
             Tensor.relu,
-            nn.ConvTranspose2d(
-                c_hid, 1, kernel_size=5, output_padding=2, padding=3, stride=2
-            ),
+            nn.ConvTranspose2d(c_hid, 1, kernel_size=5, output_padding=2, padding=3, stride=2),
         ]
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -139,7 +135,7 @@ if __name__ == "__main__":
         return MSEloss(model(X_test), Y_test)
 
     lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
-    epochss = [2, 1] if QUICK else [13, 3, 3, 1]
+    epochss = [2, 1] if QUICK else [100, 50, 50, 50]
 
     for lr, epochs in zip(lrs, epochss):
         optimizer = nn.optim.Adam(nn.state.get_parameters(model), lr=lr)
@@ -158,12 +154,10 @@ if __name__ == "__main__":
                     if test_acc >= target and test_acc != 100.0:
                         print(colored(f"{test_acc=} >= {target}", "green"))
                     else:
-                        raise ValueError(
-                            colored(f"{test_acc=} < {target}", "red")
-                        )
+                        raise ValueError(colored(f"{test_acc=} < {target}", "red"))
 
             print(f"test_accuracy: {test_acc:5.5f}")
-            model.save(f"checkpoints/checkpoint{test_acc * 1e6:.0f}")
+            model.save(f"checkpoints/checkpoint{test_acc * 1e6:.0f}_{epoch}")
 
     plot_image(X_test[1][0], model(X_test)[1][0])
 # %%

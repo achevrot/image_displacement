@@ -23,7 +23,7 @@ def img_2_tensor(filename, norm=True):
 
 
 def displacement_2_tensor(filename):
-    return Tensor(pd.read_csv(filename, sep=",", header=None).values)
+    return Tensor((pd.read_csv(filename, sep=",", header=None).values + 1) / 2)
 
 
 def rotate_vectors(x_matrix, y_matrix, angle_degrees):
@@ -72,3 +72,12 @@ def plot_image(origin_tensor, output_tensor, figsize=(10, 10)):
     ax2.imshow(img, cmap="gray")
     ax2.set_title("Output Image")
     plt.show()
+
+
+def plot_displacement(disp_tensor, figsize=(10, 10)):
+    f = plt.figure(figsize=figsize)
+    ax = f.add_subplot(121)
+    ax2 = f.add_subplot(122)
+    img = disp_tensor
+    ax.imshow(img, cmap="gray")
+    ax.set_title("Original Image")
