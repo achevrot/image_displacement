@@ -257,7 +257,7 @@ if __name__ == "__main__":
     # X_train_1 = X_train[:, 1, ...].stack(X_train[:, 1, ...], X_train[:, 1, ...], dim=1)
     # X_train = X_train_0.cat(X_train_1, dim=1)
     model = FlowNetS(input_channels=2)
-    samples = Tensor.randint(BS, high=X_train.shape[0])
+    # samples = Tensor.randint(BS, high=X_train.shape[0])
     # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
 
     steps = len(X_train) // BS
@@ -275,9 +275,8 @@ if __name__ == "__main__":
     def get_test_acc() -> Tensor:
         return MSEloss(model(X_test)[0], Y_test, mean=True) ** (1 / 2)
 
-    if GPU:
-        params = get_parameters(model)
-        [x.gpu_() for x in params]
+    params = get_parameters(model)
+    [x.gpu() for x in params]
 
     lrs = [1e-4, 1e-5] if QUICK else [1e-3, 1e-4, 1e-5, 1e-5]
     epochss = [2, 1] if QUICK else [100, 50, 50, 50]
