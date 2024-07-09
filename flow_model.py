@@ -1,5 +1,5 @@
 # %%
-from tinygrad import Tensor, TinyJit, nn, GlobalCounters
+from tinygrad import Tensor, nn, GlobalCounters
 from tinygrad.nn import optim
 from tinygrad.helpers import getenv
 from tqdm import trange
@@ -7,6 +7,7 @@ from dataloader import load
 import numpy as np
 from tinygrad.nn.state import get_parameters
 from itertools import chain
+from extra.onnx_ops import Resize
 
 GPU = getenv("GPU")
 QUICK = getenv("QUICK")
@@ -82,7 +83,6 @@ class deconv:
     def __call__(self, x: Tensor) -> Tensor:
         return x.sequential(self.layers)
 
-
 class Upsample:
     def __init__(self, scale_factor: int, mode: str = "nearest") -> None:
         assert mode == "nearest"  # only mode supported for now
@@ -97,7 +97,8 @@ class Upsample:
             tmp.reshape(list(x.shape) + [self.scale_factor] * _lens)
             .permute([0, 1] + list(chain.from_iterable([[y + 2, y + 2 + _lens] for y in range(_lens)])))
             .reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
-        )
+        )[:, :, :-3, :-3]
+
 
 
 class Upsample2:
@@ -124,8 +125,8 @@ class FlowNetS:
 
         self.training = training
         self.batchNorm = batchNorm
-        self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=1)
-        self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=1)
+        self.conv1 = conv(self.batchNorm, input_channels, 64, kernel_size=7, stride=2)
+        self.conv2 = conv(self.batchNorm, 64, 128, kernel_size=5, stride=2)
         self.conv3 = conv(self.batchNorm, 128, 256, kernel_size=5, stride=2)
         self.conv3_1 = conv(self.batchNorm, 256, 256)
         self.conv4 = conv(self.batchNorm, 256, 512, stride=2)
@@ -150,10 +151,12 @@ class FlowNetS:
         self.upsampled_flow5_to_4 = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
         self.upsampled_flow4_to_3 = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
         self.upsampled_flow3_to_2 = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
+        self.upsampled_flow2_to_1 = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
+        self.upsampled_flow1_to_out = nn.ConvTranspose2d(2, 2, 5, 2, 2, bias=False)
 
         # weights are by default initialized with kaiming normals
 
-        self.upsample1 = Upsample2(1)
+        # self.upsample1 = Upsample(4)
 
     def __call__(self, x: Tensor) -> Tensor:
 
@@ -185,11 +188,13 @@ class FlowNetS:
 
         concat2 = out_conv2.cat(out_deconv2, flow3_up, dim=1)
         flow2 = self.predict_flow2(concat2)
+        flow2 = self.upsampled_flow2_to_1(flow2)
+        flow2 = self.upsampled_flow1_to_out(flow2)
 
         if self.training:
-            return self.upsample1(flow2), flow3, flow4, flow5, flow6
+            return flow2, flow3, flow4, flow5, flow6
         else:
-            return self.upsample1(flow2)
+            return flow2
 
     def save(self, filename):
         with open(filename + ".npy", "wb") as f:
@@ -203,8 +208,7 @@ class FlowNetS:
                 # if par.requires_grad:
                 try:
                     par.numpy()[:] = np.load(f)
-                    if GPU:
-                        par.gpu()
+                    par.gpu()
                 except:
                     print("Could not load parameter")
 
@@ -228,9 +232,9 @@ def MSEloss2(y_hat, y, mean=False, BS=1):
 
 def multiscaleEPE(network_output, target_flow, weights=None):
 
-    startScale = 2
+    startScale = 8
     numScales = len(network_output)
-    loss_weights = Tensor([(0.32 / 2**scale) for scale in range(numScales)])
+    loss_weights = Tensor([(0.32 / 2**scale) for scale in range(numScales, 0, -1)])
     assert len(loss_weights) == numScales
     multiScales = [
         target_flow.avg_pool2d(startScale * (2**scale), startScale * (2**scale)).pad((None, None, (0, 1), (0, 1)))
@@ -256,6 +260,7 @@ if __name__ == "__main__":
     # X_train_0 = X_train[:, 0, ...].stack(X_train[:, 0, ...], X_train[:, 0, ...], dim=1)
     # X_train_1 = X_train[:, 1, ...].stack(X_train[:, 1, ...], X_train[:, 1, ...], dim=1)
     # X_train = X_train_0.cat(X_train_1, dim=1)
+    # model = FlowNetS(input_channels=6)
     model = FlowNetS(input_channels=2)
     # samples = Tensor.randint(BS, high=X_train.shape[0])
     # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
@@ -267,13 +272,13 @@ if __name__ == "__main__":
             opt.zero_grad()
             samples = Tensor.randint(BS, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
-            # loss = MSEloss(model(X_train[samples])[0], Y_train[samples]).backward()
+            #loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
+            loss = MSEloss2(model(X_train[samples])[0], Y_train[samples]).backward()
             opt.step()
             return loss
 
     def get_test_acc() -> Tensor:
-        return MSEloss(model(X_test)[0], Y_test, mean=True) ** (1 / 2)
+        return (((model(X_test)[0][:,0,...] - Y_test[:,0,...]) ** 2).mean() ** (1/2))
 
     params = get_parameters(model)
     [x.gpu() for x in params]
@@ -296,4 +301,6 @@ if __name__ == "__main__":
             print(f"accuracy : {accuracy:.4f}")
             model.save(f"checkpoints/checkpoint{accuracy:.4f}_{total_ep}")
 
-    # %%
+# %%
+
+# %%

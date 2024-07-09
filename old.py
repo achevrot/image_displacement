@@ -15,7 +15,7 @@ from flow_model import FlowNetS
 
 
 model = FlowNetS(training=True)
-model.load("checkpoints/checkpoint0.0526_2")
+model.load("checkpoints/checkpoint0.0179_120.npy")
 
 # %%
 
@@ -63,5 +63,9 @@ multiScales
 X_train[samples]
 # %%
 model(X_train[samples])
+
+# %%
+
+(((model(X_test)[0][:,0,...] - Y_test[:,0,...]) ** 2).mean() ** (1/2)).numpy()
 
 # %%
