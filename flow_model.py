@@ -83,6 +83,7 @@ class deconv:
     def __call__(self, x: Tensor) -> Tensor:
         return x.sequential(self.layers)
 
+
 class Upsample:
     def __init__(self, scale_factor: int, mode: str = "nearest") -> None:
         assert mode == "nearest"  # only mode supported for now
@@ -98,7 +99,6 @@ class Upsample:
             .permute([0, 1] + list(chain.from_iterable([[y + 2, y + 2 + _lens] for y in range(_lens)])))
             .reshape([b, c] + [x * self.scale_factor for x in x.shape[2:]])
         )[:, :, :-3, :-3]
-
 
 
 class Upsample2:
@@ -272,13 +272,13 @@ if __name__ == "__main__":
             opt.zero_grad()
             samples = Tensor.randint(BS, high=X_train.shape[0])
             # TODO: this "gather" of samples is very slow. will be under 5s when this is fixed
-            #loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
-            loss = MSEloss2(model(X_train[samples])[0], Y_train[samples]).backward()
+            loss = multiscaleEPE(model(X_train[samples]), Y_train[samples]).backward()
+            # loss = MSEloss2(model(X_train[samples])[0], Y_train[samples]).backward()
             opt.step()
             return loss
 
     def get_test_acc() -> Tensor:
-        return (((model(X_test)[0][:,0,...] - Y_test[:,0,...]) ** 2).mean() ** (1/2))
+        return ((model(X_test)[0][:, 0, ...] - Y_test[:, 0, ...]) ** 2).mean() ** (1 / 2)
 
     params = get_parameters(model)
     [x.gpu() for x in params]

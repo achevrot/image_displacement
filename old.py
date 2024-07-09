@@ -9,19 +9,21 @@ from model import Encoder, Decoder
 from helpers import img_2_tensor, plot_image
 from tinygrad.nn.state import get_parameters
 import numpy as np
-from flow_model import FlowNetS
+from flow_model_SD import FlowNetS, MSEloss
+from tinygrad.nn.state import safe_save, safe_load, get_state_dict, load_state_dict
 
 # %%
 
 
-model = FlowNetS(training=True)
-model.load("checkpoints/checkpoint0.0179_120.npy")
+model = FlowNetS(input_channels=2)
+state_dict = safe_load("checkpoints/checkpoint0.0397_71.safetensors")
+load_state_dict(model, state_dict)
 
 # %%
 
 X_train, Y_train, X_test, Y_test = load()
-samples = Tensor.randint(1, high=X_test.shape[0])
-X_test[samples][0, 0, ...]
+samples = Tensor.randint(1, high=X_train.shape[0])
+X_train[samples][0, 0, ...]
 
 # %%
 
@@ -66,6 +68,9 @@ model(X_train[samples])
 
 # %%
 
-(((model(X_test)[0][:,0,...] - Y_test[:,0,...]) ** 2).mean() ** (1/2)).numpy()
+(((model(X_test)[0][:, 0, ...] - Y_test[:, 0, ...]) ** 2).mean() ** (1 / 2)).numpy()
+
+# %%
+MSEloss(model(X_test)[0][:, 0, ...], Y_test[:, 0, ...]).numpy()
 
 # %%
